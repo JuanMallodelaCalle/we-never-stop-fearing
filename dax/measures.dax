@@ -1,0 +1,140 @@
+// We Never Stop Fearing - DAX measures used in the poster
+// All measures live in the _Measures table of report/WeNeverStopFearing.pbix
+
+// ============================================================
+// 1. Base measures provided in the contest starter file
+// ============================================================
+
+Number of Respondents =
+// Counts people who picked the fear shown in the chart.
+// Each person counts once. The total counts people, even if they picked several fears.
+DISTINCTCOUNT ( 'FactFearSelection'[ResponseKey] )
+
+Number of Fear Selections =
+// Counts how many fears people picked.
+// If someone picked three fears, they add 3 to the total.
+COUNTROWS ( 'FactFearSelection' )
+
+Respondents Selecting Fear (%) =
+// Shows the percentage of people who picked a fear.
+// For example, 20% means 1 in 5 people in the chosen group picked it.
+VAR _respondentsSelectingFear =
+    [Number of Respondents]
+VAR _respondentsInGroup =
+    CALCULATE (
+        [Number of Respondents],
+        REMOVEFILTERS ( 'DimFear' )
+    )
+RETURN
+    DIVIDE ( _respondentsSelectingFear, _respondentsInGroup )
+
+Responses Where Fears Remained =
+// Counts fears people picked both as kids and as adults.
+// If someone picked spiders in both lists, that counts as 1.
+CALCULATE (
+    COUNTROWS (
+        SUMMARIZE (
+            'FactFearSelection',
+            'FactFearSelection'[ResponseKey],
+            'FactFearSelection'[FearKey]
+        )
+    ),
+    KEEPFILTERS ( 'FactFearSelection'[IsRetained] = TRUE () )
+)
+
+// ============================================================
+// 2. Measures created for this poster
+// ============================================================
+
+% Respondents Still Fearing =
+// Share of all respondents who still name at least one real fear as adults
+DIVIDE (
+    [Respondents Naming Adult Fear],
+    CALCULATE ( [Number of Respondents], REMOVEFILTERS ( 'DimFear' ), REMOVEFILTERS ( 'FactFearSelection' ) )
+)
+
+Respondents Naming Adult Fear =
+// People who named at least one real fear as adults ("None of these" and "Prefer not to answer" excluded)
+CALCULATE (
+    DISTINCTCOUNT ( 'FactFearSelection'[ResponseKey] ),
+    REMOVEFILTERS ( 'DimFear' ),
+    'FactFearSelection'[LifeStage] = "Adult",
+    NOT 'DimFear'[Fear] IN { "None of these", "Prefer not to answer" }
+)
+
+KPI Performance Shift =
+// Respondents naming a Performance & Future fear: childhood → adulthood
+VAR _Childhood =
+    CALCULATE ( [Number of Respondents], 'DimFear'[Category] = "Performance & Future", 'FactFearSelection'[LifeStage] = "Childhood" )
+VAR _Adult =
+    CALCULATE ( [Number of Respondents], 'DimFear'[Category] = "Performance & Future", 'FactFearSelection'[LifeStage] = "Adult" )
+RETURN
+    _Childhood & " → " & _Adult
+
+Respondents With Retained Fear =
+// This metric counts each participant only once, even if they harbor multiple fears. It also prevents a category or FearPattern filter from accidentally altering the overall indicator.
+CALCULATE (
+    DISTINCTCOUNT ( 'FactFearSelection'[ResponseKey] ),
+    REMOVEFILTERS ( 'DimFear' ),
+    REMOVEFILTERS ( 'FactFearSelection'[FearPattern] ),
+    'FactFearSelection'[IsRetained] = TRUE ()
+)
+
+% Respondents With Retained Fear =
+VAR _RetainedRespondents =
+    [Respondents With Retained Fear]
+VAR _AllRespondents =
+    CALCULATE (
+        [Number of Respondents],
+        REMOVEFILTERS ( 'DimFear' ),
+        REMOVEFILTERS ( 'FactFearSelection'[FearPattern] ),
+        REMOVEFILTERS ( 'FactFearSelection'[IsRetained] )
+    )
+RETURN
+    DIVIDE (
+        _RetainedRespondents,
+        _AllRespondents
+    )
+
+Respondents Shift (pp) =
+// Change in share of respondents from childhood to adulthood (positive = more common as adults)
+CALCULATE ( [Respondents Selecting Fear (%)], 'FactFearSelection'[LifeStage] = "Adult" )
+    - CALCULATE ( [Respondents Selecting Fear (%)], 'FactFearSelection'[LifeStage] = "Childhood" )
+
+Retention Label =
+// Data label: people who kept the fear, out of those who had it as children
+VAR _Kept = [Responses Where Fears Remained]
+VAR _HadInChildhood =
+    CALCULATE ( [Number of Respondents], 'FactFearSelection'[LifeStage] = "Childhood" )
+RETURN
+    _Kept & " of " & _HadInChildhood
+
+Fears Left in Childhood =
+// Number of fears named in childhood that no respondent named as an adult
+COUNTROWS (
+    FILTER (
+        VALUES ( 'DimFear'[Fear] ),
+        NOT ISBLANK ( CALCULATE ( [Number of Respondents], 'FactFearSelection'[LifeStage] = "Childhood" ) )
+            && ISBLANK ( CALCULATE ( [Number of Respondents], 'FactFearSelection'[LifeStage] = "Adult" ) )
+    )
+)
+
+Respondents Change =
+// Change in respondents naming the fear: adulthood minus childhood
+CALCULATE ( [Number of Respondents], 'FactFearSelection'[LifeStage] = "Adult" )
+    - CALCULATE ( [Number of Respondents], 'FactFearSelection'[LifeStage] = "Childhood" )
+
+Respondents Change (Abs) =
+// Size of the change regardless of direction, used to pick the biggest shifts
+ABS ( [Respondents Change] )
+
+Respondents (Zero if None) =
+// Same as Number of Respondents, but returns 0 instead of blank so every line starts in childhood
+[Number of Respondents] + 0
+
+Slope Label =
+// Shows the value only at the adulthood end, avoiding overlapping labels where the lines start
+IF (
+    SELECTEDVALUE ( 'FactFearSelection'[LifeStage] ) = "Adult",
+    FORMAT ( [Respondents (Zero if None)], "0" )
+)
